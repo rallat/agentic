@@ -22,8 +22,20 @@ review-gate stops a skipped review. It does not stop collusion.
 - The check reads the current comment text. A commenter can edit or delete their own comment, and the next run reflects that.
 - The status is only a lock if the repository requires it. Without the ruleset below, the status is advisory.
 - Repository admins can bypass rulesets unless the ruleset forbids it.
-- The Claude Code hook only sees Bash tool calls. It does not stop a person at a terminal, the web UI, or `gh api` calls that call the merge endpoint directly. The server lock covers those paths.
-- The hook parses shell text. Unusual quoting or generated command strings can hide a merge. The hook blocks unbalanced quoting and inspects `bash -c` strings, but it cannot see everything.
+- The Claude Code hook only sees Bash tool calls. It does not stop a person at a terminal or the web UI. The server lock covers those paths.
+- The hook stops accidental skipped reviews. It is not a sandbox. The required server status check is the enforcement against deliberate evasion.
+- The hook is a strict allow-list. A command with no merge word passes with no network call. The text gate decodes the command, removes quotes and backslashes, and matches `merge` as a whole word. So `'mer'ge` is seen, and field names such as `mergeable` or `mergeStateStatus` in `--json` and `--jq` values do not count. The GraphQL names `mergePullRequest` and `enablePullRequestAutoMerge` are always seen. It also inspects a `gh` command, or a `g` that bash could expand into `gh` (`g?`, `g*`, `g[h]`, `g{h,}`), when `$`, a backtick, or a glob character (`[ ] ? * { }`) sits in the group slot, the subcommand slot, or the `gh api` endpoint, and any `gh api` call with `graphql`, `--input`, or `@file`. Values of data flags such as `--jq`, `--json`, `--search`, and `--label` are data and do not trigger this.
+- A command that mentions merge passes only if it is exactly one plain call: `gh pr merge <number or URL>` with an explicit `--repo OWNER/REPO` or a full pull request URL. The program must be `gh` by basename. No wrapper, env assignment, chaining, redirection, `$`, backtick, parenthesis, or glob character is allowed. Only `--squash`, `--merge`, `--rebase`, `--delete-branch`, `--match-head-commit`, `--repo`, `--subject`, and `--body` are allowed. `--auto` and `--admin` are blocked. The hook then requires `--match-head-commit` to equal the current head and a review record for that sha. It runs `gh` in the `cwd` from the hook payload.
+- The only other commands that may mention merge are short chains of read-only programs. The program must be the bare name. Allowed: `git` with `merge`, `merge-base`, `log`, `status`, `diff`, `show`, or `rev-parse`, plus `grep`, `ls`, `cat`, `head`, `tail`, `wc`, `echo`, and `printf`. Git takes no global options. Every option must match a full name on a per-subcommand list, so an abbreviated option such as `--exe` is refused. Redirection operators, `$`, backticks, parentheses, and braces refuse the whole command. A glob character in a program name, a git subcommand, or an option refuses it too. Path arguments such as `*.py` may keep globs. A pipe, a semicolon, `&`, `&&`, `||`, and a newline join segments only when each segment passes.
+- Everything else that mentions merge exits 2 with the plain form `gh pr merge <n> --repo OWNER/REPO --squash --match-head-commit <sha>`. This covers `gh api` calls, `gh alias`, `curl`, `env`, `sudo`, `xargs`, shells, `eval`, and `git rebase`, `fetch`, `checkout`, `branch`, and `cherry-pick`.
+- Known limit: commands that build `gh` and the merge words from files in the working directory or at run time can still pass the hook. The server status check covers them.
+- Known limit: a command that builds the merge at run time without the word, for example `$(printf ...)`, passes the hook. So does a pre-existing alias such as `gh m 5` and a script file that merges.
+- Known false positives, with workarounds:
+  - `git commit -m` with merge in the message. Use `git commit -F <file>`.
+  - `gh pr view "$N"` or a `gh` command with `$`, a backtick, or a glob character in the group, subcommand, or endpoint slot. Use a literal number.
+  - `gh pr create --title` with merge in the text. Avoid the word or use `--body-file` with a file.
+  - `git push` of a branch named `merge-*`. Pick another branch name.
+  - `npm run merge-*`. Avoid the word in the script name or run it from a script file.
 
 ## Install the Action
 

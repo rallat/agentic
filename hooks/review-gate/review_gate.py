@@ -15,7 +15,7 @@ import re
 import subprocess
 import sys
 from dataclasses import dataclass
-from typing import Callable, Iterable, Sequence
+from typing import Callable, Iterable, Optional, Sequence
 
 APPROVAL_LINE = re.compile(r"^Review seat: APPROVE ([0-9a-f]{40})\b")
 FULL_SHA = re.compile(r"^[0-9a-f]{40}$")
@@ -95,10 +95,10 @@ def evaluate(
 Runner = Callable[[Sequence[str]], str]
 
 
-def run_gh(args: Sequence[str]) -> str:
+def run_gh(args: Sequence[str], cwd: Optional[str] = None) -> str:
     try:
         proc = subprocess.run(
-            ["gh", *args], capture_output=True, text=True, check=False, timeout=60
+            ["gh", *args], capture_output=True, text=True, check=False, timeout=60, cwd=cwd
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
         raise GateError(f"gh failed to run: {exc}") from exc
