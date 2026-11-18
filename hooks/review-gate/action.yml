@@ -1,0 +1,50 @@
+name: review-gate
+description: Set a commit status that passes only when the pull request head commit has a recorded review comment.
+inputs:
+  allowed-authors:
+    description: Comma list of logins whose approvals count. Empty means any commenter.
+    required: false
+    default: ""
+  status-context:
+    description: Commit status context name.
+    required: false
+    default: review-gate
+  pr-number:
+    description: Pull request number.
+    required: true
+  repository:
+    description: OWNER/NAME of the pull request repository.
+    required: false
+    default: ${{ github.repository }}
+  github-token:
+    description: Token with statuses write, pull-requests read and issues read.
+    required: false
+    default: ${{ github.token }}
+runs:
+  using: composite
+  steps:
+    - name: Check review record and set status
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        ALLOWED_AUTHORS: ${{ inputs.allowed-authors }}
+        STATUS_CONTEXT: ${{ inputs.status-context }}
+        PR_NUMBER: ${{ inputs.pr-number }}
+        REPO: ${{ inputs.repository }}
+        TARGET_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+      run: |
+        set -uo pipefail
+        code=0
+        verdict=$(python3 "$GITHUB_ACTION_PATH/review_gate.py" check \
+          --repo "$REPO" --pr "$PR_NUMBER" --allowed-authors "$ALLOWED_AUTHORS" --json) || code=$?
+        if [ "$code" -ge 2 ]; then
+          echo "review-gate could not read the pull request" >&2
+          exit 1
+        fi
+        sha=$(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["head_sha"])' "$verdict")
+        reason=$(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["reason"][:140])' "$verdict")
+        if [ "$code" -eq 0 ]; then state=success; else state=failure; fi
+        gh api "repos/$REPO/statuses/$sha" \
+          -f state="$state" -f context="$STATUS_CONTEXT" \
+          -f description="$reason" -f target_url="$TARGET_URL" >/dev/null
+        echo "$state: $reason"
